@@ -1,0 +1,41 @@
+# Local development stack.
+#   docker compose up -d db            # PostgreSQL only (typical dev loop)
+#   docker compose --profile bot up    # PostgreSQL + the bot in a container
+# Credentials come from .env (copy .env.example). Defaults below are for local dev only.
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-rrc}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-rrc}
+      POSTGRES_DB: ${POSTGRES_DB:-rrc}
+      TZ: UTC
+      PGTZ: UTC
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  bot:
+    profiles: ["bot"]
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Inside the compose network the database host is "db", not localhost.
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-rrc}:${POSTGRES_PASSWORD:-rrc}@db:5432/${POSTGRES_DB:-rrc}
+      RUN_MIGRATIONS: "1"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:

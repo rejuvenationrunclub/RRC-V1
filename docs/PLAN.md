@@ -1,6 +1,6 @@
 # RRC Discord Bot — Implementation Plan (for approval)
 
-Status: **DRAFT — awaiting leadership approval. No application code is written until this plan is approved.**
+Status: **APPROVED 2026-10-27.** All §8-A recommended defaults accepted; §8-B launch values remain PROPOSED until confirmed.
 Source: *Gamification, Lifetime Recognition & Discord Automation — Leadership review v1.0 (Oct 26, 2026)*.
 
 Section references (§N) point to that document.
@@ -607,6 +607,7 @@ There are also property-based tests (Hypothesis) on the fold: for random attenda
 | 2026-10-27 | Q-M1 | **`/rrc join` starts membership.** The member accepts the rules and privacy notice, which sets `enrolled_at` (the tenure clock) and grants the enrollment shield and Initiate role. |
 | 2026-10-27 | Q-C1 | **Zero-event cycles are neutral/frozen.** No increment, no reset, no shield use. |
 | 2026-10-27 | Q-C3 | **Auto-close after grace, with a preview.** The scheduler closes cycles 24h after `ends_at` and posts a preview to `#rrc-admin-log` 2h before. Admins can force-close or recompute. |
+| 2026-10-27 | All other §8-A | **Recommended defaults accepted as written** (C2, C4, S1–S5, M2, M3, E1–E4, P1, P2, K1–K4, A1, A2, H1). Still needed as *configuration*, not code: the first flagship date (cycle anchor, C4) and the people holding each staff role (A1). |
 
 
 **Blocking implementation** questions change behavior or schema; I need answers before Phase 1–3 code. **Blocking launch** questions are numbers or terms that are already configurable, so they can be decided any time before public launch. Each has my recommended default.
