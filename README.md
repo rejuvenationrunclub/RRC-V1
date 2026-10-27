@@ -18,7 +18,7 @@ The Discord bot that runs RRC's recognition system. It tracks lifetime **Rejuven
 | 4 Recognition | Ranks, milestones, offers, nominations | planned |
 | 5 Pilot | Deployment guide, backups, 2-cycle pilot | planned |
 
-In Phase 0 the bot connects to your server and registers no commands yet.
+In Phase 0 the bot connects to your server and has one command, **`/rrc ping`**. It replies privately with the bot version, Discord latency and whether the database is reachable, which makes it a quick health check after any deploy.
 
 ---
 
@@ -40,7 +40,7 @@ To run the bot you also need `DISCORD_TOKEN` and `DISCORD_GUILD_ID` in `.env` (s
 make run                        # python -m rrc_bot
 ```
 
-Without those two variables the bot refuses to start. It names the missing variable and exits with code 2. It never falls back to a default.
+Without those two variables the bot refuses to start. It names the missing variable and exits with code 2. It never falls back to a default. Once you see `Connected as …` in the log, type `/rrc ping` in your server. The database is optional for this check; ping shows ❌ until it's reachable.
 
 ### Running everything in containers
 
@@ -161,7 +161,35 @@ In Discord, open User Settings → Advanced and turn on **Developer Mode**. Then
 - **Secrets:** set `DISCORD_TOKEN`, `DISCORD_GUILD_ID` and `DATABASE_URL` in the platform's secret store.
 - **Migrations:** set `RUN_MIGRATIONS=1` to apply on start, or run `alembic upgrade head` as a release step.
 - **Database role:** the app's role must own its database (or hold CREATE on it) so the baseline migration can create the trusted `btree_gist` extension. Superuser is not required.
-- **Backups:** enable daily automated backups with point-in-time recovery on the managed database. Phase 5 adds a restore drill.
+- **Backups:** see [Backups and restore](#backups-and-restore).
+
+## Backups and restore
+
+`scripts/backup.sh` writes a compressed `pg_dump` archive, **verifies it** with `pg_restore --list`, keeps it owner-readable only, optionally copies it to Google Cloud Storage, and prunes local archives older than `RETENTION_DAYS`. If any step fails it exits non-zero.
+
+```bash
+sudo scripts/backup.sh                                  # dump the compose "db" service to /var/backups/rrc
+sudo GCS_BUCKET=gs://my-rrc-backups scripts/backup.sh   # ...and keep an off-site copy
+```
+
+To run it nightly at 03:30 Phoenix time (10:30 UTC) with systemd, assuming the repo is at `/opt/rrc-bot`:
+
+```bash
+sudo cp deploy/systemd/rrc-backup.service deploy/systemd/rrc-backup.timer /etc/systemd/system/
+echo 'GCS_BUCKET=gs://my-rrc-backups' | sudo tee /etc/rrc-backup.env   # optional
+sudo systemctl daemon-reload && sudo systemctl enable --now rrc-backup.timer
+systemctl list-timers rrc-backup.timer       # next run
+journalctl -u rrc-backup.service             # last run's log
+```
+
+**Restore** replaces all bot data with the archive's contents. It runs in one transaction, so a failed restore changes nothing. It stops the bot during the restore and restarts it afterwards if it was running.
+
+```bash
+sudo scripts/restore.sh /var/backups/rrc/rrc-20261027T103000Z.dump --yes
+sudo scripts/restore.sh gs://my-rrc-backups/rrc-20261027T103000Z.dump --yes   # e.g. onto a new VM
+```
+
+Both scripts default to the Docker Compose database. Set `BACKUP_SOURCE=direct` to use the host's `pg_dump`/`pg_restore` with the standard `PGHOST`/`PGUSER`/`PGPASSWORD`/`PGDATABASE` variables, e.g. for a managed database. The integration tests run a full backup → disaster → restore round trip.
 
 ## Project layout
 
@@ -170,9 +198,12 @@ rrc_bot/
   config.py          environment-only settings (SecretStr for secrets)
   logging_setup.py   logging + token redaction
   bot/client.py      Discord client, least-privilege intents, guild command sync
-  db/                engine/session (UTC), declarative base
+  bot/commands/      slash-command groups (/rrc ping)
+  db/                engine/session (UTC), declarative base, health probe
 migrations/          Alembic (baseline: btree_gist + append-only trigger function)
 tests/               unit/, integration/ (real Postgres), repo hygiene
 docker/              entrypoint, Postgres init (creates the test DB)
+scripts/             backup.sh, restore.sh
+deploy/systemd/      nightly backup timer
 docs/PLAN.md         approved architecture, schema, state diagrams, policy decisions
 ```

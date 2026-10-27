@@ -1,0 +1,12 @@
+[Unit]
+Description=Nightly RRC bot database backup
+
+[Timer]
+# 10:30 UTC = 03:30 America/Phoenix (no DST), when nobody is checking in.
+OnCalendar=*-*-* 10:30:00 UTC
+RandomizedDelaySec=10min
+# Run at next boot if the VM was off at the scheduled time.
+Persistent=true
+
+[Install]
+WantedBy=timers.target
