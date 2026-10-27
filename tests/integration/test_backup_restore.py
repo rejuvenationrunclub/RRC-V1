@@ -21,6 +21,7 @@ import asyncpg
 import pytest
 from alembic import command
 from alembic.config import Config
+from alembic.script import ScriptDirectory
 
 pytestmark = pytest.mark.integration
 
@@ -112,7 +113,8 @@ def test_backup_then_restore_round_trip(db_env: dict[str, str], test_database_ur
     rows = _sql(test_database_url, "SELECT id, note FROM backup_probe")
     assert [(r["id"], r["note"]) for r in rows] == [(1, "first flagship run")]
     version = _sql(test_database_url, "SELECT version_num FROM alembic_version")
-    assert [r["version_num"] for r in version] == ["0001"]
+    head = ScriptDirectory.from_config(Config(str(ROOT / "alembic.ini"))).get_current_head()
+    assert [r["version_num"] for r in version] == [head]
 
 
 def test_restore_refuses_without_confirmation(

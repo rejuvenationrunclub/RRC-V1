@@ -7,13 +7,18 @@ Message Content is deliberately never requested.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
 
 import discord
 from discord import app_commands
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from rrc_bot.bot.commands.admin import AdminCommands
 from rrc_bot.bot.commands.rrc import RRCCommands
+from rrc_bot.bot.context import BotServices
+from rrc_bot.bot.dispatcher import OutboxDispatcher
 
 log = logging.getLogger(__name__)
 
@@ -33,14 +38,21 @@ class RRCBot(discord.Client):
         )
         self.guild_id = guild_id
         self.engine = engine
+        self.services = BotServices(engine)
         self.tree = app_commands.CommandTree(self)
         # Single-server bot: guild-scoped commands update instantly (global ones take up to 1 h).
-        self.tree.add_command(RRCCommands(engine=engine), guild=discord.Object(id=guild_id))
+        guild = discord.Object(id=guild_id)
+        self.tree.add_command(RRCCommands(engine=engine, services=self.services), guild=guild)
+        self.tree.add_command(AdminCommands(self.services), guild=guild)
+        self._dispatcher_task: asyncio.Task[None] | None = None
 
     async def setup_hook(self) -> None:
         guild = discord.Object(id=self.guild_id)
         synced = await self.tree.sync(guild=guild)
         log.info("Synced %d application command(s) to guild %s", len(synced), self.guild_id)
+        if self.engine is not None:
+            dispatcher = OutboxDispatcher(self, self.services)
+            self._dispatcher_task = asyncio.create_task(dispatcher.run(), name="outbox")
 
     async def on_ready(self) -> None:
         user = self.user
@@ -53,6 +65,10 @@ class RRCBot(discord.Client):
             )
 
     async def close(self) -> None:
+        if self._dispatcher_task is not None:
+            self._dispatcher_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._dispatcher_task
         await super().close()
         if self.engine is not None:
             await self.engine.dispose()

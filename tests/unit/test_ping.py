@@ -8,6 +8,7 @@ import discord
 import pytest
 
 from rrc_bot.bot.client import RRCBot
+from rrc_bot.bot.commands.admin import AdminCommands
 from rrc_bot.bot.commands.rrc import RRCCommands, format_ping
 
 
@@ -64,12 +65,29 @@ async def test_ping_reports_database_health() -> None:
         assert label in interaction.followup.send.call_args.args[0]
 
 
-def test_rrc_group_is_guild_scoped_and_guild_only() -> None:
+def test_command_groups_are_guild_scoped_and_guild_only() -> None:
     bot = RRCBot(guild_id=4242)
     guild_cmds = bot.tree.get_commands(guild=discord.Object(id=4242))
-    assert [c.name for c in guild_cmds] == ["rrc"]
+    assert [c.name for c in guild_cmds] == ["rrc", "rrc-admin"]
     assert bot.tree.get_commands() == []  # nothing registered globally
-    group = guild_cmds[0]
-    assert isinstance(group, RRCCommands)
-    assert group.guild_only is True
-    assert [c.name for c in group.commands] == ["ping"]
+    member, admin = guild_cmds
+    assert isinstance(member, RRCCommands) and isinstance(admin, AdminCommands)
+    assert member.guild_only is True and admin.guild_only is True
+    assert [c.name for c in member.commands] == ["ping", "join", "events", "checkin", "profile"]
+    # members never see the admin group by default; the bot re-checks roles anyway
+    assert member.default_permissions is None
+    assert admin.default_permissions == discord.Permissions(manage_guild=True)
+    names = sorted(c.qualified_name for c in admin.walk_commands())
+    assert "rrc-admin event code" in names and "rrc-admin attendance add" in names
+
+
+def test_command_payload_fits_discord_limits() -> None:
+    bot = RRCBot(guild_id=4242)
+    for group in bot.tree.get_commands(guild=discord.Object(id=4242)):
+        data = group.to_dict(bot.tree)
+        stack = [data]
+        while stack:
+            node = stack.pop()
+            assert len(node["name"]) <= 32 and node["name"] == node["name"].lower()
+            assert 1 <= len(node.get("description", "x")) <= 100, node["name"]
+            stack.extend(node.get("options", []))

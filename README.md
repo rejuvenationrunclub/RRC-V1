@@ -11,14 +11,36 @@ The Discord bot that runs RRC's recognition system. It tracks lifetime **Rejuven
 
 | Phase | Scope | State |
 |---|---|---|
-| 0 Scaffold | Config, Docker Compose, Alembic baseline, CI, tests | ✅ this release |
-| 1 Rules + data | Schema, rule engine, §10 edge-case tests | next |
-| 2 Attendance | Events, check-in codes, staff roster, profile | planned |
-| 3 Cycles | Hot Streaks, shields, cycle close, proof review | planned |
+| 0 Scaffold | Config, Docker Compose, Alembic baseline, CI, tests | ✅ |
+| 1 Rules + data | Schema, rule engine, §10 edge-case tests | ✅ |
+| 2 Attendance | Events, check-in codes, staff roster, profile | ✅ test release |
+| 3 Cycles | Hot Streaks, shields, cycle close, proof review | next |
 | 4 Recognition | Ranks, milestones, offers, nominations | planned |
 | 5 Pilot | Monitoring, restore drill, 2-cycle pilot (GCP guide and backups already shipped) | planned |
 
-In Phase 0 the bot connects to your server and has one command, **`/rrc ping`**. It replies privately with the bot version, Discord latency and whether the database is reachable, which makes it a quick health check after any deploy.
+### What the bot does today (v0.2.0)
+
+All replies are private to the person who asked.
+
+| Members | |
+|---|---|
+| `/rrc join` | Shows the rules and privacy notice; **I agree** enrolls you (Initiate role, 1 shield) |
+| `/rrc events` | Upcoming runs and when this 2-week cycle ends (Phoenix time) |
+| `/rrc checkin code:…` | Check in at a run with the code staff show. It stays *pending* until staff confirm the roster. |
+| `/rrc profile` | Lifetime RP, rank, shields, progress toward the next rank, recent points |
+| `/rrc ping` | Health check: version, Discord latency, database |
+
+| Staff and admins (`/rrc-admin`) | |
+|---|---|
+| `setup` | Server managers: cycle start date, admin/staff/Initiate roles, admin-log and upcoming-runs channels, plus a permissions self-check |
+| `event create` / `list` / `publish` | Schedule a flagship (10 RP) or pop-up (3 or 5 RP) run; announces it in the upcoming-runs channel |
+| `event code` | The rotating check-in code (changes every minute) with a **Refresh** button |
+| `event open` / `close` | Open or close check-in early or late (by default it's open from 30 minutes before to 30 minutes after the run) |
+| `event roster` / `finalize` | See who checked in; **finalize** confirms everyone pending and posts their RP (members get a DM) |
+| `event cancel` | Admins only; check-ins already made are kept |
+| `attendance add` / `reject` | Add someone who was there (a reason is required after check-in closes) or reject a check-in |
+
+Hot Streak bonuses and using shields on missed cycles need cycle closing, which is Phase 3. Until then streak counts stay at 0. Every scoring value is **PROPOSED** (rule set v1). Step-by-step test script: [`docs/TEST_SERVER_GUIDE.md`](docs/TEST_SERVER_GUIDE.md).
 
 ---
 
@@ -79,6 +101,11 @@ make test                       # unit + integration (TEST_DATABASE_URL from env
 
 Integration tests run against real PostgreSQL. Without `TEST_DATABASE_URL` they are **skipped** locally. CI sets `RRC_REQUIRE_DB=1`, which makes a missing database a **failure** instead.
 
+- `tests/edge_cases/`: the plan's §5 edge cases for the scoring engine, plus property tests (Hypothesis) on the streak fold
+- `tests/integration/test_schema.py`: models match migrations; append-only ledgers, frozen rule sets, no overlapping cycles, offers can't go live without approved terms
+- `tests/integration/test_services.py`: check-in, roster and RP posting, including concurrent confirmations (exactly one ledger entry) and many simultaneous check-ins
+- `tests/integration/test_commands.py`: every slash command driven with fake Discord interactions, end to end
+
 ## Database migrations
 
 ```bash
@@ -88,7 +115,7 @@ uv run alembic revision -m "describe change" --autogenerate   # new migration (r
 uv run alembic check            # fails if models and migrations disagree
 ```
 
-Alembic reads `DATABASE_URL` from the environment; no URL is stored in `alembic.ini`. The baseline migration installs `btree_gist` and the `rrc_forbid_mutation()` trigger function. Phase 1 attaches it to every append-only table (RP ledger, shield ledger, audit log, unlocks, promotions), so history can only be corrected with compensating rows.
+Alembic reads `DATABASE_URL` from the environment; no URL is stored in `alembic.ini`. The baseline migration (0001) installs `btree_gist` and the `rrc_forbid_mutation()` trigger function. Migration 0002 creates the full schema and attaches that trigger to every append-only table (RP ledger, shield ledger, audit log, unlocks, promotions), so history can only be corrected with compensating rows. Rule sets are frozen once active. The bot container applies migrations on start, so deploying a new version upgrades the database automatically.
 
 ---
 
@@ -204,11 +231,16 @@ Both scripts default to the Docker Compose database. Set `BACKUP_SOURCE=direct` 
 rrc_bot/
   config.py          environment-only settings (SecretStr for secrets)
   logging_setup.py   logging + token redaction
-  bot/client.py      Discord client, least-privilege intents, guild command sync
-  bot/commands/      slash-command groups (/rrc ping)
-  db/                engine/session (UTC), declarative base, health probe
-migrations/          Alembic (baseline: btree_gist + append-only trigger function)
-tests/               unit/, integration/ (real Postgres), repo hygiene
+  domain/            PURE scoring engine: rules (+ rules_default.yaml, all PROPOSED), RP and
+                     rounding, streak fold, shields, ranks, milestones, rotating codes, time math
+  services/          transactions, member-row locks, idempotency, audit log, outbox
+  bot/client.py      Discord client, least-privilege intents, guild command sync, outbox task
+  bot/commands/      /rrc (members) and /rrc-admin (staff/admins)
+  bot/render.py      every message's wording; bot/parsing.py: dates and times staff type
+  bot/dispatcher.py  delivers DMs, channel posts and role changes from the outbox, with retries
+  db/                engine/session (UTC), models (full schema), health probe
+migrations/          Alembic: 0001 baseline, 0002 full schema + append-only triggers
+tests/               unit/, edge_cases/, integration/ (real Postgres), scripts/, repo hygiene
 docker/              entrypoint, Postgres init (creates the test DB)
 scripts/             backup.sh, restore.sh; Google Cloud: gcp-provision.sh (laptop/Cloud Shell),
                      gcp-vm.sh (remote ops), vm-deploy.sh + gcp-vm-bootstrap.sh (on the VM)

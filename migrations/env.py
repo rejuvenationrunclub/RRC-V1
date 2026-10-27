@@ -13,6 +13,7 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy.engine import Connection
 
+import rrc_bot.db.models  # noqa: F401  (registers every table on Base.metadata)
 from rrc_bot.config import Settings
 from rrc_bot.db.base import Base
 from rrc_bot.db.session import make_engine
