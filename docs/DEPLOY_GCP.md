@@ -101,7 +101,7 @@ From Cloud Shell (or any machine with `gcloud`), in the `RRC-V1` folder:
 | Back up right now | `bash scripts/gcp-vm.sh PROJECT_ID backup-now` |
 | Shell on the VM | `bash scripts/gcp-vm.sh PROJECT_ID ssh` (or the **SSH** button in Compute Engine) |
 
-On the VM itself: live logs `cd /opt/rrc-bot && sudo docker compose --profile bot logs -f bot`, last backup `journalctl -u rrc-backup.service -n 20 --no-pager`, disk `df -h /`.
+On the VM itself: live logs `cd /opt/rrc-bot && sudo docker compose --profile bot logs -f bot`, last backup `sudo journalctl -u rrc-backup.service -n 20 --no-pager`, disk `df -h /`.
 
 ## Restoring
 
@@ -112,7 +112,7 @@ ls -lt /var/backups/rrc | head
 sudo /opt/rrc-bot/scripts/restore.sh /var/backups/rrc/rrc-YYYYMMDDTHHMMSSZ.dump --yes
 ```
 
-**If the VM itself is lost:** delete it if it still exists (`gcloud compute instances delete rrc-bot --zone=us-west1-b`). Re-run steps 2 and 4; your token is still in Secret Manager. Then restore on the VM (`bash scripts/gcp-vm.sh PROJECT_ID ssh`):
+**If the VM itself is lost:** delete it if it still exists (`gcloud compute instances list` shows its zone; then `gcloud compute instances delete rrc-bot --zone=THAT_ZONE`). Re-run steps 2 and 4; your token is still in Secret Manager. Then restore on the VM (`bash scripts/gcp-vm.sh PROJECT_ID ssh`):
 
 ```bash
 sudo /opt/rrc-bot/scripts/restore.sh gs://rrc-backups-YOUR_PROJECT_ID/rrc-YYYYMMDDTHHMMSSZ.dump --yes
@@ -131,5 +131,6 @@ The restore runs in a single transaction, so if it fails nothing changes. The bo
 | Ping shows `Database: ❌ unreachable` | `sudo docker compose -f /opt/rrc-bot/docker-compose.yml ps db` should show *healthy*. Check its logs. |
 | `project ... has no billing account linked` | Billing → Account management → link the project, then re-run `gcp-provision.sh` |
 | `zone ... is outside the free-tier regions` | Use a zone in `us-west1`, `us-central1` or `us-east1` |
+| `ZONE_RESOURCE_POOL_EXHAUSTED` when creating the VM | No e2-micro capacity in that zone. Re-run `bash scripts/gcp-provision.sh YOUR_PROJECT_ID us-west1-a` (or `us-west1-c`). `gcp-vm.sh` finds the VM's zone by itself. |
 | Backup `upload ... failed` | Re-run `gcp-provision.sh`; it re-applies the bucket permissions |
 | Unexpected charges | Billing → Reports. Check that only one VM exists, in a free region, with a `pd-standard` disk. |

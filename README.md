@@ -186,7 +186,7 @@ sudo cp deploy/systemd/rrc-backup.service deploy/systemd/rrc-backup.timer /etc/s
 echo 'GCS_BUCKET=gs://my-rrc-backups' | sudo tee /etc/rrc-backup.env   # optional
 sudo systemctl daemon-reload && sudo systemctl enable --now rrc-backup.timer
 systemctl list-timers rrc-backup.timer       # next run
-journalctl -u rrc-backup.service             # last run's log
+sudo journalctl -u rrc-backup.service        # last run's log
 ```
 
 **Restore** replaces all bot data with the archive's contents. It runs in one transaction, so a failed restore changes nothing. It stops the bot during the restore and restarts it afterwards if it was running.

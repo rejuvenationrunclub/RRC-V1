@@ -45,7 +45,7 @@ You are deploying the RRC bot for a non-technical owner on a **Windows** laptop.
 
 ### Hard rules
 1. **Never ask for, display, log, or store the Discord bot token.** The human adds it to Secret Manager in their browser. Never run `gcloud secrets versions access`. To check the token exists, list version *names* only.
-2. **Stay inside the free-tier shape.** Use only the scripts below. Don't change the VM type or disk, and don't create additional VMs. Zones must be in `us-west1`, `us-central1` or `us-east1`; default to `us-west1-b`.
+2. **Stay inside the free-tier shape.** Use only the scripts below. Don't change the VM type or disk, and don't create additional VMs. Zones must be in `us-west1`, `us-central1` or `us-east1`; default to `us-west1-b`, then `us-west1-a` or `us-west1-c` if it has no capacity (step 6).
 3. **Ask the HUMAN before** anything that deletes resources, or costs more than the documented ~$3.65/month.
 4. If a step fails, read the error and fix it if the cause is clear. Otherwise explain it plainly and ask. Never work around an error by weakening security, such as opening firewall ports, making the bucket public, or granting broad IAM roles.
 
@@ -71,24 +71,29 @@ Bash won't see the new `PATH` until a new shell starts. Find `gcloud` under `/c/
 **4. Budget alert ($5).**
 ```bash
 gcloud services enable billingbudgets.googleapis.com --project=PROJECT_ID
-gcloud billing budgets create --billing-account=BILLING_ACCOUNT --display-name="RRC bot" \
-  --budget-amount=5USD --filter-projects=projects/PROJECT_ID \
+gcloud billing budgets create --billing-account=BILLING_ACCOUNT --billing-project=PROJECT_ID \
+  --display-name="RRC bot" --budget-amount=5USD --filter-projects=projects/PROJECT_ID \
   --threshold-rule=percent=0.5 --threshold-rule=percent=0.9 --threshold-rule=percent=1.0
 ```
-If this fails, the HUMAN can create it instead: Billing → Budgets & alerts → Create budget, project `PROJECT_ID`, $5, alerts at 50/90/100%. Ask them to do that, then continue.
+`--billing-project` matters: without it the command fails with "requires a quota project" or `SERVICE_DISABLED`. If it still fails, the HUMAN can create it instead: Billing → Budgets & alerts → Create budget, project `PROJECT_ID`, $5, alerts at 50/90/100%. Ask them to do that, then continue.
 
 **5. Get the code into Cloud Shell.** Cloud Shell is Linux, which avoids Windows shell quirks:
 ```bash
 gcloud cloud-shell ssh --authorize-session --command \
   "{ [ -d ~/RRC-V1/.git ] || git clone -q https://github.com/rejuvenationrunclub/RRC-V1.git ~/RRC-V1; } && cd ~/RRC-V1 && git fetch -q origin && git checkout -q BRANCH && git pull -q --ff-only origin BRANCH && git log --oneline -1"
 ```
-If `gcloud cloud-shell` is unavailable, do steps 5–9 locally in Git Bash from a clone of the repo instead. The scripts are portable bash.
+If `gcloud cloud-shell` is unavailable, or hangs after printing "Tunnel stopped" (seen on Windows), do steps 5–10 locally in Git Bash from a clone of the repo instead. The scripts are portable bash. On Windows, clone with long paths enabled or checkout fails on deep paths:
+```bash
+git -c core.longpaths=true clone https://github.com/rejuvenationrunclub/RRC-V1.git && cd RRC-V1 && git checkout -q BRANCH
+```
 
 **6. Provision the cloud resources.**
 ```bash
 gcloud cloud-shell ssh --authorize-session --command "cd ~/RRC-V1 && bash scripts/gcp-provision.sh PROJECT_ID"
 ```
 This creates a least-privilege service account, a private backup bucket, an empty `discord-token` secret and the e2-micro VM. It's safe to re-run.
+
+If VM creation fails with `ZONE_RESOURCE_POOL_EXHAUSTED` (no e2-micro capacity in `us-west1-b`), re-run it with another zone as the second argument: `bash scripts/gcp-provision.sh PROJECT_ID us-west1-a` (or `us-west1-c`). `gcp-vm.sh` finds the VM's zone by itself, so later steps need no change.
 
 **7. Bot token (HUMAN).** Send the human this link and these instructions:
 > Open https://console.cloud.google.com/security/secret-manager/secret/discord-token/versions?project=PROJECT_ID. Click **+ NEW VERSION**, paste your Discord bot token, then click **ADD NEW VERSION**. Tell me when it's done. Please don't paste the token here.
