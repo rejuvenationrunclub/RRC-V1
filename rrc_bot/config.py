@@ -57,6 +57,14 @@ class Settings(BaseSettings):
             return None
         return value
 
+    # .env.example ships these as `KEY=` with no value; an empty string is not an int.
+    @field_validator("discord_application_id", "discord_guild_id", mode="before")
+    @classmethod
+    def _blank_id_is_none(cls, value: object) -> object:
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
     @property
     def tz(self) -> ZoneInfo:
         return ZoneInfo(self.display_tz)
