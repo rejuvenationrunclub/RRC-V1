@@ -119,6 +119,7 @@ def test_join_prompt_lists_coming_soon_without_terms() -> None:
     text = render.join_prompt(SETTINGS)
     assert "**Coming soon**" in text and "RRC Marketplace" in text
     assert "show up 3 cycles in a row" in text
+    assert "**Proof of Progress**: earn points for your solo workouts" in text
     assert "You start with 1 streak shield." in text
     assert "PROPOSED" not in text  # internal label stays internal
     assert "%" not in text and "$" not in text  # no offer terms before they're live
