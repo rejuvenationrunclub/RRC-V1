@@ -199,7 +199,7 @@ cycles (
   id bigserial PK, guild_id bigint, seq int,
   starts_at timestamptz, ends_at timestamptz,     -- half-open [starts_at, ends_at), 14 days
   status text CHECK (status IN ('upcoming','open','grace','closing','closed')),
-  is_neutral bool NULL,                           -- set at close (see policy Q-C1)
+  is_neutral bool NULL,                           -- set at close: true when zero qualifying events (Q-C1)
   closed_at timestamptz, closed_by bigint NULL,   -- NULL = scheduler
   UNIQUE (guild_id, seq),
   EXCLUDE USING gist (guild_id WITH =, tstzrange(starts_at, ends_at) WITH &&)
@@ -438,7 +438,7 @@ stateDiagram-v2
   Building --> Reset: missed, no shield usable
   Hot --> Reset: missed, no shield usable
   Reset --> Building: count=0, Hot off (lifetime RP & rank untouched)
-  Building --> Building: neutral cycle (Q-C1) — no change
+  Building --> Building: neutral cycle — no change
   Hot --> Hot: neutral cycle — no change
 ```
 
@@ -534,7 +534,7 @@ These are hidden from regular members via `default_member_permissions`, and the 
 | 1 | Late check-ins | Code check-ins are accepted only inside `[checkin_opens_at, checkin_closes_at]`. After that, staff add a `late_exception` attendance with a reason. If the event's cycle is already closed, this triggers a member recompute. | code after window rejected; late_exception inside grace counts toward cycle; late_exception after close triggers bonus and shield corrections |
 | 2 | Canceled events | Canceling before check-in has no RP effect. Canceling after check-in follows Q-E2. Neutrality is recomputed if no qualifying event remains. | cancel with/without attendances; cancel only event → cycle neutral |
 | 3 | Rescheduling | Allowed among open/upcoming cycles. Moving across cycles with verified attendance needs admin and recomputes both cycles. Moving into a closed cycle is blocked. | same cycle; cross cycle; into closed → error |
-| 4 | Cycle with no qualifying event | `is_neutral` → no increment, reset or shield use (pending Q-C1) | neutral cycle between qualified ones keeps count |
+| 4 | Cycle with no qualifying event | `is_neutral` → no increment, reset or shield use (decided, Q-C1) | neutral cycle between qualified ones keeps count |
 | 5 | Two events in one cycle | Both earn base RP. Only the earliest by event start gets 1.5×. The streak counts once. A shared `activity_group_key` counts once. | flagship + pop-up; pop-up + challenge same group |
 | 6 | Third-cycle activation | Bonus goes on the first qualifying activity of cycle 3 | Q,Q,Q → bonus in c3 only on first activity; Q,Q,S,Q → bonus at 4th cycle |
 | 7 | Rounding | half_up on integer arithmetic: `(base*3 + 1)//2` | 3→5, 5→8, 10→15, 0→0, configurable mode |
@@ -599,23 +599,33 @@ There are also property-based tests (Hypothesis) on the fold: for random attenda
 
 ## 8. Open policy questions
 
+### Decisions log
+
+| Date | ID | Decision |
+|---|---|---|
+| 2026-10-27 | Q-V1 | **Code + staff roster.** A valid rotating code creates a *pending* attendance. RP posts only when staff confirm the roster. `verification_mode` stays per-event in the schema, but the default and pilot value is `code_plus_roster`. |
+| 2026-10-27 | Q-M1 | **`/rrc join` starts membership.** The member accepts the rules and privacy notice, which sets `enrolled_at` (the tenure clock) and grants the enrollment shield and Initiate role. |
+| 2026-10-27 | Q-C1 | **Zero-event cycles are neutral/frozen.** No increment, no reset, no shield use. |
+| 2026-10-27 | Q-C3 | **Auto-close after grace, with a preview.** The scheduler closes cycles 24h after `ends_at` and posts a preview to `#rrc-admin-log` 2h before. Admins can force-close or recompute. |
+
+
 **Blocking implementation** questions change behavior or schema; I need answers before Phase 1–3 code. **Blocking launch** questions are numbers or terms that are already configurable, so they can be decided any time before public launch. Each has my recommended default.
 
 ### A. Blocking implementation
 
 | ID | Question | Recommended default |
 |---|---|---|
-| Q-V1 | **Check-in verification:** does a valid rotating code verify immediately, or create a *pending* record that staff confirm on a roster? | Configurable per event; default `code_plus_roster` for the pilot (§9: "QR alone is insufficient") |
-| Q-C1 | **Zero-event cycle:** if no qualifying event is published, is the cycle neutral (no increment, no reset, no shield use) for everyone? | Yes, neutral |
+| Q-V1 ✅ | **Check-in verification:** does a valid rotating code verify immediately, or create a *pending* record that staff confirm on a roster? | Configurable per event; default `code_plus_roster` for the pilot (§9: "QR alone is insufficient") |
+| Q-C1 ✅ | **Zero-event cycle:** if no qualifying event is published, is the cycle neutral (no increment, no reset, no shield use) for everyone? | Yes, neutral |
 | Q-C2 | Does a **neutral cycle break** the "no two consecutive protected cycles" chain (S, N, S)? | No. Neutral cycles are skipped, so S, N, S counts as consecutive → second miss resets |
-| Q-C3 | **Cycle close:** automatic at deadline plus grace, or only when an admin presses close? Grace length? | Automatic after 24h grace, with `preview-close` posted to the admin log 2h before |
+| Q-C3 ✅ | **Cycle close:** automatic at deadline plus grace, or only when an admin presses close? Grace length? | Automatic after 24h grace, with `preview-close` posted to the admin log 2h before |
 | Q-C4 | **Cycle boundary time:** 00:00 Phoenix on flagship-aligned dates? Which date is cycle #1? | 00:00 Phoenix; you provide the first flagship date |
 | Q-S1 | Do shields get consumed when **streak count is 0** (nothing to protect)? | No. Only consume when count > 0 |
 | Q-S2 | Can members **opt out** of auto-consumption (save shields)? | No for MVP |
 | Q-S3 | When **Hot** and a shield protects a cycle, does Hot (1.5×) stay active? | Yes. Count preserved means Hot preserved |
 | Q-S4 | Shield grant **while at cap**: forfeited permanently or deferred until below cap? | Forfeited (recorded); never re-earned for that threshold |
 | Q-S5 | Do **manual adjustments** and **proof RP** count toward 100-RP shield thresholds and milestones? | Yes. All lifetime RP counts |
-| Q-M1 | **Enrollment:** what starts membership (and the 12/52-week clock)? `/rrc join`, joining the server, or staff approval? | `/rrc join` with rules/privacy acceptance |
+| Q-M1 ✅ | **Enrollment:** what starts membership (and the 12/52-week clock)? `/rrc join`, joining the server, or staff approval? | `/rrc join` with rules/privacy acceptance |
 | Q-M2 | **Leave/rejoin:** keep the original enrollment date and RP? Does the streak keep running while absent? | Keep everything; missed cycles while away count as missed |
 | Q-M3 | **Data deletion request:** anonymize (keep ledger totals for audit) or hard-delete? | Anonymize: strip Discord ID and text, keep numeric ledger |
 | Q-E1 | "Same pop-up cannot be counted as a separate challenge twice": is a challenge held at a pop-up **one activity** (one RP award)? | Yes, via `activity_group_key` |
