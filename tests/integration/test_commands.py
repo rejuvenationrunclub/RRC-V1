@@ -128,6 +128,7 @@ async def test_full_test_server_walkthrough(services: BotServices) -> None:
     # Autocomplete finds it.
     choices = await event_choices(interaction(services, STAFFER, roles=(STAFF_ROLE,)), "sat")
     assert [c.value for c in choices] == [1] and choices[0].name.startswith("#1 Saturday Flagship")
+    assert await event_choices(interaction(services, RUNNER), "sat") == []  # members: nothing
 
     # Members see it, but can't use staff commands.
     i = interaction(services, RUNNER)

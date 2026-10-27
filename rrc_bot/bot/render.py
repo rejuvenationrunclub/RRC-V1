@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from rrc_bot.domain.ranks import RANK_TITLES
@@ -44,16 +44,26 @@ def event_choice(e: EventView, tz: ZoneInfo) -> str:
 
 
 def join_prompt(settings: GuildSettings) -> str:
+    shields = settings.rules.shields.enrollment_grant
+    # "Coming soon" names features only; never terms, prices or how spending works
+    # (plan §0: recognition first, never over-promise rewards).
     return (
-        "**Join the Rejuvenation Run Club program**\n"
-        "• Earn **Rejuvenation Points (RP)** for runs you attend: staff confirm who was there, "
-        "then your points arrive.\n"
-        "• Ranks are permanent: Initiate → Relentless → Legacy.\n"
-        f"• You start with {settings.rules.shields.enrollment_grant} streak shield.\n\n"
+        "**Join the Rejuvenation Run Club**\n"
+        "🏃 Earn **Rejuvenation Points (RP)** for every run you attend. Staff confirm who "
+        "was there, then your points arrive.\n"
+        "🏅 Climb permanent ranks: **Initiate → Relentless → Legacy**.\n"
+        f"🛡️ You start with {shields} streak shield{'' if shields == 1 else 's'}.\n\n"
+        "**Coming soon** 🚧\n"
+        "🛒 **RRC Marketplace**: put your points to use on gear, perks and partner offers\n"
+        f"🔥 **Hot Streaks**: show up {settings.rules.streak.activation_cycles} cycles in a row "
+        "to earn bonus points\n"
+        "💪 **Solo workouts**: log training on your own for points\n"
+        "🎉 **Milestone rewards** and member spotlights\n"
+        "_We'll share the details before each one goes live._\n\n"
         "**Privacy:** the bot stores your Discord ID, your check-ins and your points to run "
         "the program. Only you and RRC staff see your records. Ask an admin any time to "
         "export or remove your data.\n\n"
-        f"_Scoring values are {settings.rules.label}; they may change before launch._"
+        "_Point values may be adjusted during the beta._"
     )
 
 
@@ -71,14 +81,30 @@ def joined(result: JoinResult, settings: GuildSettings) -> str:
 
 
 def events_list(events: list[EventView], settings: GuildSettings, now: datetime) -> str:
-    seq = cycle_seq(now, settings.anchor_day, settings.rules.cycle_length_days, settings.tz)
-    _, ends = cycle_bounds(seq, settings.anchor_day, settings.rules.cycle_length_days, settings.tz)
     lines = ["**Upcoming RRC runs** (Phoenix time)"]
     lines += [f"• {event_line(e, settings.tz, now)}" for e in events] or [
         "• Nothing scheduled yet."
     ]
-    lines.append(f"\nThis 2-week cycle ends **{when(ends, settings.tz)}**.")
+    lines.append("\n" + cycle_line(settings, now))
     return clip("\n".join(lines))
+
+
+def cycle_line(settings: GuildSettings, now: datetime) -> str:
+    """Where we are in the cycle calendar, naming days rather than midnights."""
+    length = settings.rules.cycle_length_days
+    seq = cycle_seq(now, settings.anchor_day, length, settings.tz)
+    if seq < 0:
+        first, _ = cycle_bounds(0, settings.anchor_day, length, settings.tz)
+        return f"Cycle 1 starts **{day_label(first, settings.tz)}**."
+    _, ends = cycle_bounds(seq, settings.anchor_day, length, settings.tz)
+    last_day = day_label(ends - timedelta(seconds=1), settings.tz)
+    return f"This cycle (cycle {seq + 1}) runs through **{last_day}**."
+
+
+def day_label(instant: datetime, tz: ZoneInfo) -> str:
+    """``Fri Nov 6`` in ``tz``."""
+    local = instant.astimezone(tz)
+    return f"{local:%a} {local:%b} {local.day}"
 
 
 def checkin_reply(result: CheckinResult, settings: GuildSettings) -> str:

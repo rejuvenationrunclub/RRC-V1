@@ -1,6 +1,6 @@
 [project]
 name = "rrc-bot"
-version = "0.2.0"
+version = "0.2.1"
 description = "Rejuvenation Run Club Discord bot: lifetime RP, ranks, Hot Streaks and recognition."
 readme = "README.md"
 requires-python = ">=3.12,<3.14"

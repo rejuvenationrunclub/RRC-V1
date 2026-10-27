@@ -38,6 +38,8 @@ async def event_choices(
     guild_id = interaction.guild_id
 
     async def go(s: AsyncSession, g: GuildSettings) -> list[app_commands.Choice[int]]:
+        if not actor_for(interaction, g.role_ids).is_staff:
+            return []  # members get no event names, even if they can see the command
         found = await events.list_events(
             s,
             g,

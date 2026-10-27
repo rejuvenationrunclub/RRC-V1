@@ -99,8 +99,30 @@ def test_events_list_shows_open_checkin_and_cycle_end() -> None:
     text = render.events_list([event()], SETTINGS, NOW)
     assert "**Saturday Flagship** (Flagship run, 10 RP) · Sat Nov 7, 7:10 AM · Papago Park" in text
     assert "check-in open now" in text
-    assert "cycle ends **Sun Nov 15, 12:00 AM**" in text
+    assert "This cycle (cycle 1) runs through **Sat Nov 14**." in text
     assert "Nothing scheduled" in render.events_list([], SETTINGS, NOW)
+
+
+def test_cycle_line_before_launch_and_on_boundaries() -> None:
+    launch = GuildSettings(**{**SETTINGS.__dict__, "anchor_day": date(2026, 11, 6)})
+    before = datetime(2026, 10, 27, 20, 0, tzinfo=UTC)
+    assert render.cycle_line(launch, before) == "Cycle 1 starts **Fri Nov 6**."
+    first_minute = datetime(2026, 11, 6, 7, 0, tzinfo=UTC)  # 00:00 Phoenix
+    assert render.cycle_line(launch, first_minute) == (
+        "This cycle (cycle 1) runs through **Thu Nov 19**."
+    )
+    second = datetime(2026, 11, 20, 7, 0, tzinfo=UTC)
+    assert render.cycle_line(launch, second) == "This cycle (cycle 2) runs through **Thu Dec 3**."
+
+
+def test_join_prompt_lists_coming_soon_without_terms() -> None:
+    text = render.join_prompt(SETTINGS)
+    assert "**Coming soon**" in text and "RRC Marketplace" in text
+    assert "show up 3 cycles in a row" in text
+    assert "You start with 1 streak shield." in text
+    assert "PROPOSED" not in text  # internal label stays internal
+    assert "%" not in text and "$" not in text  # no offer terms before they're live
+    assert len(text) <= render.DISCORD_LIMIT
 
 
 @pytest.mark.parametrize(
