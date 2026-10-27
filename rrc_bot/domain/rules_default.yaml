@@ -1,0 +1,25 @@
+# Seeded scoring rules (plan §2.3). EVERY value here is PROPOSED (plan §8-B):
+# leadership confirms them before public launch. Change them by activating a
+# new rule-set version, never by editing history.
+label: "PROPOSED v1 (pilot only)"
+cycle_length_days: 14
+rp:
+  flagship: 10
+  popup_allowed: [3, 5]
+  proof_per_day: 1
+  proof_week_cap: 7          # Phoenix Mon-Sun week
+streak:
+  activation_cycles: 3
+  multiplier: "1.5"
+  rounding: half_up          # 4.5 -> 5, 7.5 -> 8, 15.0 -> 15
+  bonus_applies_to: first_qualifying_activity_per_cycle
+  late_checkin_grace_hours: 24
+shields:
+  enrollment_grant: 1
+  grant_every_rp: 100
+  max_balance: 2
+  auto_consume: true
+  allow_consecutive: false
+ranks:
+  relentless: { min_rp: 150, min_weeks_enrolled: 12, min_inperson: 4 }
+  legacy: { min_rp: 700, min_weeks_enrolled: 52, min_inperson_in_52w: 18, min_active_weeks: 40 }
