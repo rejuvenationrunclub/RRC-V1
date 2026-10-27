@@ -1,0 +1,12 @@
+# gitleaks configuration: default rules plus an allowlist for documented,
+# local-only placeholder values. Real Discord tokens are still caught everywhere.
+title = "rrc-bot gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Local-development placeholders documented in .env.example"
+regexes = [
+  '''change-me-local-only''',
+]

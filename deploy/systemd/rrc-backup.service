@@ -1,0 +1,14 @@
+[Unit]
+Description=Back up the RRC bot PostgreSQL database
+Documentation=file:///opt/rrc-bot/docs/DEPLOY_GCP.md
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/rrc-bot
+# Optional overrides: GCS_BUCKET, RETENTION_DAYS, BACKUP_DIR.
+EnvironmentFile=-/etc/rrc-backup.env
+ExecStart=/opt/rrc-bot/scripts/backup.sh
+Nice=10
+IOSchedulingClass=idle
