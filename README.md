@@ -16,7 +16,7 @@ The Discord bot that runs RRC's recognition system. It tracks lifetime **Rejuven
 | 2 Attendance | Events, check-in codes, staff roster, profile | planned |
 | 3 Cycles | Hot Streaks, shields, cycle close, proof review | planned |
 | 4 Recognition | Ranks, milestones, offers, nominations | planned |
-| 5 Pilot | Deployment guide, backups, 2-cycle pilot | planned |
+| 5 Pilot | Monitoring, restore drill, 2-cycle pilot (GCP guide and backups already shipped) | planned |
 
 In Phase 0 the bot connects to your server and has one command, **`/rrc ping`**. It replies privately with the bot version, Discord latency and whether the database is reachable, which makes it a quick health check after any deploy.
 
@@ -154,9 +154,14 @@ In Discord, open User Settings → Advanced and turn on **Developer Mode**. Then
 
 ---
 
-## Deployment (preliminary; the full guide ships in Phase 5)
+## Deployment
 
-- **Shape:** one always-on container (the Discord gateway is a persistent websocket), run as **a single replica**, plus managed PostgreSQL 16 (Neon, Supabase, RDS, Railway or Fly Postgres).
+**Step-by-step Google Cloud guide: [`docs/DEPLOY_GCP.md`](docs/DEPLOY_GCP.md).** It runs the bot and PostgreSQL on one e2-micro VM for about $3.65/month (the public IPv4 address) and includes nightly off-site backups.
+
+General requirements for any host:
+
+
+- **Shape:** one always-on container (the Discord gateway is a persistent websocket), run as **a single replica**, plus PostgreSQL 16 (on the same VM via Compose, or managed).
 - **Image:** `docker build -t rrc-bot .` produces a slim, non-root runtime image without dev tools.
 - **Secrets:** set `DISCORD_TOKEN`, `DISCORD_GUILD_ID` and `DATABASE_URL` in the platform's secret store.
 - **Migrations:** set `RUN_MIGRATIONS=1` to apply on start, or run `alembic upgrade head` as a release step.
@@ -203,7 +208,8 @@ rrc_bot/
 migrations/          Alembic (baseline: btree_gist + append-only trigger function)
 tests/               unit/, integration/ (real Postgres), repo hygiene
 docker/              entrypoint, Postgres init (creates the test DB)
-scripts/             backup.sh, restore.sh
+scripts/             backup.sh, restore.sh, gcp-vm-bootstrap.sh
 deploy/systemd/      nightly backup timer
 docs/PLAN.md         approved architecture, schema, state diagrams, policy decisions
+docs/DEPLOY_GCP.md   Google Cloud deployment, operations and restore runbook
 ```
