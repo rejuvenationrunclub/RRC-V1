@@ -72,15 +72,38 @@ def test_update_defaults_to_main_and_keeps_guild(vm) -> None:  # type: ignore[no
 
 
 def test_zone_override(vm) -> None:  # type: ignore[no-untyped-def]
-    r = vm("rrc-bot-123", "status", ZONE="us-central1-a")
+    r = vm("rrc-bot-123", "status", ZONE="us-central1-a", STUB_VM_ZONE="us-west1-a")
     assert r.code == 0, r.err
     assert "--zone=us-central1-a" in _ssh(r)
+    assert not [c for c in r.calls if "instances list" in c]
 
 
-def test_backup_now_lists_bucket(vm) -> None:  # type: ignore[no-untyped-def]
+@pytest.mark.parametrize("cmd", ["status", "ssh"])
+def test_zone_found_from_the_vm(vm, cmd: str) -> None:  # type: ignore[no-untyped-def]
+    # Provisioning falls back to another zone when us-west1-b has no e2-micro capacity.
+    r = vm("rrc-bot-123", cmd, STUB_VM_ZONE="us-west1-a")
+    assert r.code == 0, r.err
+    lookup = [c for c in r.calls if "compute instances list" in c]
+    assert len(lookup) == 1
+    assert "--project=rrc-bot-123" in lookup[0]
+    assert "--filter=name=rrc-bot" in lookup[0]
+    assert "compute ssh rrc-bot --zone=us-west1-a --project=rrc-bot-123" in _ssh(r)
+
+
+def test_zone_lookup_falls_back_to_default(vm) -> None:  # type: ignore[no-untyped-def]
+    r = vm("rrc-bot-123", "status", STUB_VM_ZONE="")
+    assert r.code == 0, r.err
+    assert "--zone=us-west1-b" in _ssh(r)
+
+
+def test_backup_now_shows_log_and_lists_bucket(vm) -> None:  # type: ignore[no-untyped-def]
     r = vm("rrc-bot-123", "backup-now")
     assert r.code == 0, r.err
-    assert "systemctl start rrc-backup.service" in _ssh(r)
+    command = _ssh(r).split("--command ", 1)[1]
+    assert command == (
+        "sudo systemctl start rrc-backup.service"
+        " && sudo journalctl -u rrc-backup.service -n 8 --no-pager -q"
+    )
     assert any("storage ls" in c and "gs://rrc-backups-rrc-bot-123/" in c for c in r.calls)
 
 
@@ -100,7 +123,7 @@ def test_backup_now_lists_bucket(vm) -> None:  # type: ignore[no-untyped-def]
 def test_rejects_bad_input_without_touching_the_vm(vm, args: tuple[str, ...]) -> None:  # type: ignore[no-untyped-def]
     r = vm(*args)
     assert r.code != 0
-    assert not [c for c in r.calls if "compute ssh" in c]
+    assert r.calls == []
 
 
 @pytest.mark.parametrize("project", ["x", "Rrc-Bot", "rrc;reboot", "rrc-bot-123-", "1rrc-bot"])

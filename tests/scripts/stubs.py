@@ -21,6 +21,7 @@ case "$*" in
   *"billing projects describe"*) echo "${STUB_BILLING:-True}"; exit 0 ;;
   *"secrets versions list"*)
     [ -n "${STUB_HAS_TOKEN:-}" ] && echo "projects/p/secrets/discord-token/versions/1"; exit 0 ;;
+  *"compute instances list"*) [ -n "${STUB_VM_ZONE:-}" ] && echo "$STUB_VM_ZONE"; exit 0 ;;
 esac
 key=""
 case "$*" in

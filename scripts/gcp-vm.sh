@@ -8,15 +8,17 @@
 #   scripts/gcp-vm.sh <PROJECT_ID> ssh                  # interactive shell (for people)
 #
 # deploy/update fetch the code onto the VM (/opt/rrc-bot) and run scripts/vm-deploy.sh,
-# which backs up first when already installed. ZONE env var overrides us-west1-b.
+# which backs up first when already installed. The VM's zone is looked up (falling
+# back to us-west1-b); set the ZONE env var to skip the lookup.
 set -euo pipefail
 
 REPO_URL="https://github.com/rejuvenationrunclub/RRC-V1.git"
 VM=rrc-bot
-ZONE="${ZONE:-us-west1-b}"
+DEFAULT_ZONE=us-west1-b
+ZONE="${ZONE:-}"
 
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
-usage() { sed -n '2,11p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+usage() { sed -n '2,12p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 
 [ $# -ge 2 ] || usage
 PROJECT="$1"
@@ -36,7 +38,17 @@ while [ $# -gt 0 ]; do
 done
 case "$branch" in '' | -* | *[!A-Za-z0-9._/-]*) die "invalid branch name: '$branch'" ;; esac
 
+# Provisioning may have put the VM in another zone when us-west1-b had no capacity.
+# Looked up only once the arguments are valid, so bad input never reaches gcloud.
+resolve_zone() {
+    [ -z "$ZONE" ] || return 0
+    ZONE="$(gcloud compute instances list --project="$PROJECT" --filter="name=$VM" \
+        --format='value(zone.basename())' 2>/dev/null | tr -d '\r' | head -n 1 || true)"
+    case "$ZONE" in '' | *[!a-z0-9-]*) ZONE="$DEFAULT_ZONE" ;; esac
+}
+
 remote() {
+    resolve_zone
     gcloud compute ssh "$VM" --zone="$ZONE" --project="$PROJECT" --quiet --command "$1"
 }
 
@@ -56,7 +68,7 @@ case "$cmd" in
         remote "$sync_code && sudo /opt/rrc-bot/scripts/vm-deploy.sh"
         ;;
     backup-now)
-        remote "sudo systemctl start rrc-backup.service && journalctl -u rrc-backup.service -n 8 --no-pager"
+        remote "sudo systemctl start rrc-backup.service && sudo journalctl -u rrc-backup.service -n 8 --no-pager -q"
         echo "Off-site copies:"
         gcloud storage ls --project="$PROJECT" "gs://rrc-backups-$PROJECT/"
         ;;
@@ -64,6 +76,7 @@ case "$cmd" in
         remote "cd /opt/rrc-bot && sudo docker compose --profile bot ps && sudo docker compose --profile bot logs --no-color --tail 30 bot"
         ;;
     ssh)
+        resolve_zone
         gcloud compute ssh "$VM" --zone="$ZONE" --project="$PROJECT"
         ;;
     *) usage ;;
