@@ -1,6 +1,14 @@
 # Deploying the RRC bot on Google Cloud (e2-micro)
 
-This guide runs the bot **and** its PostgreSQL database on one small Google Compute Engine VM with Docker Compose. It adds nightly backups to Google Cloud Storage. Plan for about 45 minutes the first time.
+This guide runs the bot **and** its PostgreSQL database on one small Google Compute Engine VM with Docker Compose. It adds nightly backups to Google Cloud Storage. Two scripts do the work:
+
+| Script | Runs on | Does |
+|---|---|---|
+| `scripts/gcp-provision.sh` | your laptop or Cloud Shell | Creates the VM, backup bucket, token secret and a least-privilege service account. Re-runnable. Refuses billed regions. |
+| `scripts/vm-deploy.sh` | the VM | Host setup, settings file, token from Secret Manager, backups, start, and a connection check. Re-runnable; also used for updates. |
+| `scripts/gcp-vm.sh` | your laptop or Cloud Shell | Runs deploy, update, backup-now, status or ssh on the VM for you. |
+
+> **Want Claude to do this for you on your Windows laptop?** See [`LAPTOP_SETUP.md`](LAPTOP_SETUP.md). This page is the manual path, using only a web browser and Cloud Shell.
 
 ## What it costs
 
@@ -10,177 +18,90 @@ This guide runs the bot **and** its PostgreSQL database on one small Google Comp
 | 30 GB **standard** persistent disk | Yes: up to 30 GB standard (not "balanced") | $0 |
 | Public IPv4 address (the bot needs it to reach Discord) | **No** | **≈ $3.65/month** |
 | Outbound traffic | First 1 GB/month free; the bot uses far less | $0 |
+| Secret Manager (1 secret, a few reads per deploy) | Small free allowance | $0 |
 | Backups in Cloud Storage (a few MB) | Small free allowance in US regions | $0 to a few cents |
 | **Total** | | **≈ $3.65/month** |
 
-Free-tier rules change. Check <https://cloud.google.com/free> before you start, and set the budget alert in step 1 so a surprise never goes unnoticed.
+Free-tier rules change. Check <https://cloud.google.com/free> and set the budget alert in step 1. The provisioning script hard-codes the free-tier VM shape and disk type, and rejects other regions.
 
-**Two settings that quietly cost money if you get them wrong:** a region outside the three listed, or the console's default **balanced** disk. The commands below set both correctly.
+## Before you start: Discord
+
+Do the README's [Discord Developer Portal setup](../README.md#discord-developer-portal-setup) steps 1–4 first:
+- create the app;
+- turn on **Server Members Intent**;
+- invite the bot to your server with permissions `268553216`;
+- copy the **bot token** into a password manager.
+
+Also turn on Discord Developer Mode, then right-click your server and choose **Copy Server ID**.
 
 ---
 
 ## 1. Google Cloud account, project and budget alert
 
-1. Go to <https://console.cloud.google.com/> and sign in. Accept the terms, and add a billing account (a card is required for identity checks).
-   - New accounts start on a **90-day free trial with credits**. **Before day 90, click "Activate full account"** (Billing → Overview). Otherwise Google stops the VM when the trial ends. Always Free usage stays free after activation.
-2. Create a project: click the top-bar project picker, then **New Project**, name it `rrc-bot` and click **Create**. Note the **Project ID** (e.g. `rrc-bot-123456`).
-3. Budget alert: open **Billing → Budgets & alerts → Create budget**. Choose scope: project `rrc-bot`; amount: **$5**; alert thresholds: 50%, 90%, 100%. Click **Finish**. You'll be emailed if spending heads above the expected ~$3.65.
+1. Go to <https://console.cloud.google.com/>, sign in, and add a billing account. A card is required for identity checks.
+   - New accounts start on a **90-day free trial**. **Before day 90, click "Activate full account"** (Billing → Overview), or Google stops the VM when the trial ends.
+2. Create a project: top-bar project picker → **New Project** → name `rrc-bot` → **Create**. Note the **Project ID** (e.g. `rrc-bot-123456`). Make sure it's linked to your billing account (Billing → Account management → My projects).
+3. **Budget alert:** Billing → **Budgets & alerts** → **Create budget**. Set scope to project `rrc-bot`, amount to **$5**, and alerts at 50%, 90% and 100%.
 
-## 2. Create the VM (copy-paste in Cloud Shell)
+## 2. Create the resources (Cloud Shell)
 
-Click the **Cloud Shell** icon (`>_`, top right of the console). A terminal opens in your browser, already logged in. Paste:
-
-```bash
-gcloud config set project YOUR_PROJECT_ID        # e.g. rrc-bot-123456
-gcloud services enable compute.googleapis.com storage.googleapis.com
-
-gcloud compute instances create rrc-bot \
-  --zone=us-west1-b \
-  --machine-type=e2-micro \
-  --image-family=debian-12 --image-project=debian-cloud \
-  --boot-disk-size=30GB --boot-disk-type=pd-standard \
-  --scopes=storage-rw,logging-write,monitoring-write \
-  --metadata=enable-oslogin=TRUE
-```
-
-- `us-west1` (Oregon) is the free-tier region closest to Phoenix.
-- `pd-standard` keeps the disk free. The console defaults to "balanced", which is billed.
-- `storage-rw` lets the VM upload backups to Cloud Storage.
-- No inbound ports are opened beyond Google's default SSH rule. The bot only makes **outbound** connections to Discord, and PostgreSQL listens on localhost only.
-
-*(Optional hardening)* Remove the default rule that allows Windows Remote Desktop from the internet: `gcloud compute firewall-rules delete default-allow-rdp --quiet`.
-
-## 3. Backup bucket (still in Cloud Shell)
-
-Bucket names are global, so this one includes your project ID:
+Open **Cloud Shell** (the `>_` icon, top right) and run:
 
 ```bash
-PROJECT_ID=$(gcloud config get-value project)
-BUCKET=gs://rrc-backups-$PROJECT_ID
-
-gcloud storage buckets create "$BUCKET" --location=us-west1 \
-  --default-storage-class=STANDARD --uniform-bucket-level-access --public-access-prevention
-
-# Delete backups older than 30 days automatically
-cat > /tmp/lifecycle.json <<'EOF'
-{"rule": [{"action": {"type": "Delete"}, "condition": {"age": 30}}]}
-EOF
-gcloud storage buckets update "$BUCKET" --lifecycle-file=/tmp/lifecycle.json
-
-# Let the VM write and read backups (but not delete them)
-SA=$(gcloud compute instances describe rrc-bot --zone=us-west1-b \
-      --format='value(serviceAccounts[0].email)')
-gcloud storage buckets add-iam-policy-binding "$BUCKET" \
-  --member="serviceAccount:$SA" --role=roles/storage.objectCreator
-gcloud storage buckets add-iam-policy-binding "$BUCKET" \
-  --member="serviceAccount:$SA" --role=roles/storage.objectViewer
-
-echo "Your bucket: $BUCKET"      # write this down for step 8
+git clone https://github.com/rejuvenationrunclub/RRC-V1.git && cd RRC-V1
+git checkout claude/rejuvenation-discord-bot-ladfug      # until merged; then main
+bash scripts/gcp-provision.sh YOUR_PROJECT_ID             # default zone us-west1-b (Oregon, closest to Phoenix)
 ```
 
-## 4. Connect to the VM
+The script finishes with a summary and a link for the next step.
 
-Console → **Compute Engine → VM instances** → on the `rrc-bot` row click **SSH**. A terminal on the VM opens in a new window. (Or from Cloud Shell: `gcloud compute ssh rrc-bot --zone=us-west1-b`.)
+## 3. Add the bot token to Secret Manager (you, in the browser)
 
-**Everything from here on runs on the VM.**
+Open the link the script printed: **Security → Secret Manager → `discord-token`**. Click **+ NEW VERSION**, paste the bot token, and click **ADD NEW VERSION**.
 
-## 5. Get the code and run the one-time setup
+The token now lives only in Secret Manager. Only the VM's service account can read it. It never goes in chat, email, the repo, or any file you edit by hand.
+
+## 4. Deploy onto the VM
+
+Still in Cloud Shell, in the `RRC-V1` folder (replace the two values):
 
 ```bash
-sudo apt-get update && sudo apt-get install -y git
-sudo mkdir -p /opt/rrc-bot && sudo chown "$USER" /opt/rrc-bot
+bash scripts/gcp-vm.sh YOUR_PROJECT_ID deploy --guild-id YOUR_DISCORD_SERVER_ID \
+  --branch claude/rejuvenation-discord-bot-ladfug     # omit --branch once merged to main
 ```
 
-**If the GitHub repository is private** (most likely), give the VM a read-only deploy key:
+This connects to the VM and downloads the code to `/opt/rrc-bot`. It then runs `scripts/vm-deploy.sh` there. The first run takes about 5–10 minutes: OS updates, Docker install and the image build. It ends with:
+
+```
+==> SUCCESS: Connected as RRC Bot#1234 (id=...)
+==> Now type /rrc ping in your Discord server.
+```
+
+In Discord, `/rrc ping` should reply privately with **Database: ✅ connected**.
+
+## 5. Prove backups work
 
 ```bash
-ssh-keygen -t ed25519 -f ~/.ssh/rrc_deploy -N "" -C "rrc-bot VM"
-cat ~/.ssh/rrc_deploy.pub
+bash scripts/gcp-vm.sh YOUR_PROJECT_ID backup-now
 ```
 
-Copy the line that starts with `ssh-ed25519`. On GitHub, open the repo, then **Settings → Deploy keys → Add deploy key**. Title it `rrc-bot VM`, paste the key, leave **Allow write access unchecked** and click **Add key**. Then:
-
-```bash
-cat >> ~/.ssh/config <<'EOF'
-Host github.com
-  IdentityFile ~/.ssh/rrc_deploy
-  IdentitiesOnly yes
-EOF
-git clone git@github.com:rejuvenationrunclub/RRC-V1.git /opt/rrc-bot
-```
-
-(If the repo is public, use `git clone https://github.com/rejuvenationrunclub/RRC-V1.git /opt/rrc-bot` instead.)
-
-```bash
-cd /opt/rrc-bot
-git checkout claude/rejuvenation-discord-bot-ladfug   # until this work is merged; then use main
-sudo scripts/gcp-vm-bootstrap.sh
-```
-
-The bootstrap script takes a few minutes. It installs OS updates and automatic security updates, a 1 GB swap file, Docker and Compose, Docker log rotation and the backup folder. It is safe to re-run.
-
-## 6. Create the secrets file
-
-```bash
-cd /opt/rrc-bot
-cp .env.example .env && chmod 600 .env
-PW=$(openssl rand -hex 24)
-sed -i "s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=$PW/;
-        s#^DATABASE_URL=.*#DATABASE_URL=postgresql+asyncpg://rrc:$PW@localhost:5432/rrc#;
-        s#^TEST_DATABASE_URL=.*#TEST_DATABASE_URL=#" .env
-unset PW
-nano .env
-```
-
-In `nano`, fill in `DISCORD_TOKEN=` (from the Developer Portal, see the README) and `DISCORD_GUILD_ID=` (right-click your server → Copy Server ID). Optionally fill in `DISCORD_APPLICATION_ID=`. Save with **Ctrl+O, Enter** and exit with **Ctrl+X**.
-
-The token now lives only in this file, readable only by you and root. Never commit it, paste it in chat, or copy it into the repo.
-
-## 7. Start the bot
-
-```bash
-sudo docker compose --profile bot up -d --build      # first build takes ~3–5 min on an e2-micro
-sudo docker compose logs -f bot                      # Ctrl+C to stop watching (the bot keeps running)
-```
-
-Look for `Connected as RRC Bot#…`. Then, in your Discord server, type **`/rrc ping`**. You should get a private reply:
-
-> 🏃 Pong! RRC Bot v0.1.0 is online.
-> • Discord latency: 40 ms
-> • Database: ✅ connected
-
-Both containers restart on their own after a crash or VM reboot. Test it once with `sudo reboot`, wait a minute, and `/rrc ping` again.
-
-## 8. Nightly backups
-
-```bash
-cd /opt/rrc-bot
-sudo cp deploy/systemd/rrc-backup.service deploy/systemd/rrc-backup.timer /etc/systemd/system/
-echo 'GCS_BUCKET=gs://rrc-backups-YOUR_PROJECT_ID' | sudo tee /etc/rrc-backup.env
-sudo systemctl daemon-reload
-sudo systemctl enable --now rrc-backup.timer
-
-# Run one now to prove it works:
-sudo systemctl start rrc-backup.service
-journalctl -u rrc-backup.service -n 20 --no-pager     # expect "wrote ..." then "done"
-gcloud storage ls gs://rrc-backups-YOUR_PROJECT_ID/   # the archive should be listed
-```
-
-Backups run every night at **03:30 Phoenix time**. The VM keeps 14 days locally and Cloud Storage keeps 30 days. Check the schedule with `systemctl list-timers rrc-backup.timer`.
+The log should end with `done`, and the bucket listing should show an `rrc-….dump` file. After this, backups run nightly at **03:30 Phoenix time**. The VM keeps 14 days and Cloud Storage keeps 30. The VM can add backups but not delete them.
 
 ---
 
 ## Day-to-day operations
 
-| Task | Command (on the VM, in `/opt/rrc-bot`) |
+From Cloud Shell (or any machine with `gcloud`), in the `RRC-V1` folder:
+
+| Task | Command |
 |---|---|
-| Is it running? | `sudo docker compose --profile bot ps`, or `/rrc ping` in Discord |
-| Live logs | `sudo docker compose logs -f bot` |
-| Restart the bot | `sudo docker compose --profile bot restart bot` |
-| **Update to new code** | `sudo scripts/backup.sh && git pull && sudo docker compose --profile bot up -d --build`. Migrations apply automatically on start. |
-| Rotate the Discord token | Reset in the Developer Portal → `nano .env` → `sudo docker compose --profile bot up -d --force-recreate bot` |
-| Last backup result | `journalctl -u rrc-backup.service -n 20 --no-pager` |
-| Disk space | `df -h /` and `sudo docker system df` |
+| Is it running? | `/rrc ping` in Discord, or `bash scripts/gcp-vm.sh PROJECT_ID status` |
+| **Update to new code** | `bash scripts/gcp-vm.sh PROJECT_ID update`. This backs up first, migrates and restarts. Add `--branch …` if not deploying `main`. |
+| **Rotate the Discord token** | Reset it in the Developer Portal → Secret Manager → `discord-token` → **+ NEW VERSION** → `bash scripts/gcp-vm.sh PROJECT_ID update`. Then disable the old version in Secret Manager. |
+| Back up right now | `bash scripts/gcp-vm.sh PROJECT_ID backup-now` |
+| Shell on the VM | `bash scripts/gcp-vm.sh PROJECT_ID ssh` (or the **SSH** button in Compute Engine) |
+
+On the VM itself: live logs `cd /opt/rrc-bot && sudo docker compose --profile bot logs -f bot`, last backup `journalctl -u rrc-backup.service -n 20 --no-pager`, disk `df -h /`.
 
 ## Restoring
 
@@ -188,26 +109,27 @@ From a local archive:
 
 ```bash
 ls -lt /var/backups/rrc | head
-sudo scripts/restore.sh /var/backups/rrc/rrc-YYYYMMDDTHHMMSSZ.dump --yes
+sudo /opt/rrc-bot/scripts/restore.sh /var/backups/rrc/rrc-YYYYMMDDTHHMMSSZ.dump --yes
 ```
 
-**If the VM itself is lost:** repeat steps 2 and 4–7 on a new VM. Then:
+**If the VM itself is lost:** delete it if it still exists (`gcloud compute instances delete rrc-bot --zone=us-west1-b`). Re-run steps 2 and 4; your token is still in Secret Manager. Then restore on the VM (`bash scripts/gcp-vm.sh PROJECT_ID ssh`):
 
 ```bash
-gcloud storage ls gs://rrc-backups-YOUR_PROJECT_ID/
-sudo scripts/restore.sh gs://rrc-backups-YOUR_PROJECT_ID/rrc-YYYYMMDDTHHMMSSZ.dump --yes
+sudo /opt/rrc-bot/scripts/restore.sh gs://rrc-backups-YOUR_PROJECT_ID/rrc-YYYYMMDDTHHMMSSZ.dump --yes
 ```
 
-The restore runs in a single transaction, so if it fails, nothing changes. The bot is stopped during the restore and started again afterwards.
+The restore runs in a single transaction, so if it fails nothing changes. The bot is stopped during the restore and started again afterwards.
 
 ## Troubleshooting
 
-| Symptom | Likely cause / fix |
+| Message / symptom | Fix |
 |---|---|
-| Log says `Missing required environment variable(s)` | `DISCORD_TOKEN` or `DISCORD_GUILD_ID` is blank in `.env` |
-| `Improper token has been passed` | The token was mistyped or reset. Copy a fresh one into `.env` and restart the bot. |
-| `/rrc ping` doesn't appear in Discord | Wrong `DISCORD_GUILD_ID`, or the bot was invited without the `applications.commands` scope. Re-invite with the README URL. |
-| Ping shows `Database: ❌ unreachable` | `sudo docker compose ps db` should show *healthy*. Check `sudo docker compose logs db`. |
-| Log warns `not a member of configured guild` | Invite the bot with the OAuth2 URL from the README |
-| Backup fails with `upload ... failed` | The VM's scopes or bucket permissions from steps 2–3 are missing. Re-run the two `add-iam-policy-binding` commands. |
-| Unexpected charges | Billing → Reports. Check the region, disk type (`pd-standard`) and that only one VM exists. |
+| `no Discord token in Secret Manager secret 'discord-token' yet` | Do step 3, then re-run step 4 |
+| `Discord rejected the Server Members intent` | Developer Portal → Bot → enable **Server Members Intent** → re-run step 4 |
+| `Discord rejected the token` | Reset the token → add it as a **new version** in Secret Manager → re-run step 4 |
+| `/rrc ping` doesn't appear in Discord | Wrong server ID (re-run step 4 with the right `--guild-id`), or the bot was invited without `applications.commands`. Re-invite with the README URL. |
+| Ping shows `Database: ❌ unreachable` | `sudo docker compose -f /opt/rrc-bot/docker-compose.yml ps db` should show *healthy*. Check its logs. |
+| `project ... has no billing account linked` | Billing → Account management → link the project, then re-run `gcp-provision.sh` |
+| `zone ... is outside the free-tier regions` | Use a zone in `us-west1`, `us-central1` or `us-east1` |
+| Backup `upload ... failed` | Re-run `gcp-provision.sh`; it re-applies the bucket permissions |
+| Unexpected charges | Billing → Reports. Check that only one VM exists, in a free region, with a `pd-standard` disk. |

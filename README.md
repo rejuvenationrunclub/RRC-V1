@@ -156,7 +156,9 @@ In Discord, open User Settings → Advanced and turn on **Developer Mode**. Then
 
 ## Deployment
 
-**Step-by-step Google Cloud guide: [`docs/DEPLOY_GCP.md`](docs/DEPLOY_GCP.md).** It runs the bot and PostgreSQL on one e2-micro VM for about $3.65/month (the public IPv4 address) and includes nightly off-site backups.
+**Step-by-step Google Cloud guide: [`docs/DEPLOY_GCP.md`](docs/DEPLOY_GCP.md).** It runs the bot and PostgreSQL on one e2-micro VM for about $3.65/month (the public IPv4 address) and includes nightly off-site backups. The bot token lives in Google Secret Manager, never in a file you edit.
+
+**Rather have Claude do it from your Windows laptop?** Follow [`docs/LAPTOP_SETUP.md`](docs/LAPTOP_SETUP.md). You do the sign-ins and paste the token into Google yourself; Claude does the rest.
 
 General requirements for any host:
 
@@ -208,8 +210,10 @@ rrc_bot/
 migrations/          Alembic (baseline: btree_gist + append-only trigger function)
 tests/               unit/, integration/ (real Postgres), repo hygiene
 docker/              entrypoint, Postgres init (creates the test DB)
-scripts/             backup.sh, restore.sh, gcp-vm-bootstrap.sh
-deploy/systemd/      nightly backup timer
+scripts/             backup.sh, restore.sh; Google Cloud: gcp-provision.sh (laptop/Cloud Shell),
+                     gcp-vm.sh (remote ops), vm-deploy.sh + gcp-vm-bootstrap.sh (on the VM)
+deploy/              systemd backup timer, Cloud Storage lifecycle rule
 docs/PLAN.md         approved architecture, schema, state diagrams, policy decisions
 docs/DEPLOY_GCP.md   Google Cloud deployment, operations and restore runbook
+docs/LAPTOP_SETUP.md hand-off for Claude on a Windows laptop to deploy it for you
 ```

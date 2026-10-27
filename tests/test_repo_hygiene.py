@@ -15,7 +15,7 @@ TOKEN_RE = re.compile(r"[MNO][A-Za-z\d_-]{23,27}\.[A-Za-z\d_-]{6}\.[A-Za-z\d_-]{
 def _tracked_files() -> list[Path]:
     try:
         out = subprocess.run(
-            ["git", "ls-files", "-co", "--exclude-standard"],  # noqa: S607
+            ["git", "ls-files", "-co", "--exclude-standard"],
             cwd=ROOT,
             check=True,
             capture_output=True,

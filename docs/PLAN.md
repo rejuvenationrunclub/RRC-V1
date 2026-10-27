@@ -608,7 +608,7 @@ There are also property-based tests (Hypothesis) on the fold: for random attenda
 | 2026-10-27 | Q-C1 | **Zero-event cycles are neutral/frozen.** No increment, no reset, no shield use. |
 | 2026-10-27 | Q-C3 | **Auto-close after grace, with a preview.** The scheduler closes cycles 24h after `ends_at` and posts a preview to `#rrc-admin-log` 2h before. Admins can force-close or recompute. |
 | 2026-10-27 | All other §8-A | **Recommended defaults accepted as written** (C2, C4, S1–S5, M2, M3, E1–E4, P1, P2, K1–K4, A1, A2, H1). Still needed as *configuration*, not code: the first flagship date (cycle anchor, C4) and the people holding each staff role (A1). |
-| 2026-10-27 | L7 | **Hosting: Google Cloud e2-micro** (us-west1) running the bot and PostgreSQL via Docker Compose, with nightly verified backups to Cloud Storage. Accepted cost of about $3.65/month for the public IPv4 address. Runbook: `docs/DEPLOY_GCP.md`. |
+| 2026-10-27 | L7 | **Hosting: Google Cloud e2-micro** (us-west1) running the bot and PostgreSQL via Docker Compose, with nightly verified backups to Cloud Storage. Accepted cost of about $3.65/month for the public IPv4 address. The Discord token is stored in **Secret Manager**, readable only by a dedicated least-privilege VM service account. Runbooks: `docs/DEPLOY_GCP.md` (manual) and `docs/LAPTOP_SETUP.md` (Claude on the owner's Windows laptop). |
 
 
 **Blocking implementation** questions change behavior or schema; I need answers before Phase 1–3 code. **Blocking launch** questions are numbers or terms that are already configurable, so they can be decided any time before public launch. Each has my recommended default.
